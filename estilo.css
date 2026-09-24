@@ -24,6 +24,10 @@ header.top{display:flex;align-items:center;justify-content:space-between;gap:12p
 .marca{display:flex;align-items:center;gap:10px;font-weight:800;color:var(--roxo);letter-spacing:-.01em;text-decoration:none}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .marca{color:#C9B3EE}}
 .cruz{width:26px;height:26px;flex:none}
+.logo{height:44px;width:auto;display:block}
+.modulo-nome{padding-left:12px;margin-left:2px;border-left:1.5px solid var(--line);font-size:17px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .logo{background:#fff;border-radius:8px;padding:4px 8px;box-sizing:content-box;height:36px}}
+@media (max-width:420px){.logo{height:36px}.modulo-nome{font-size:15px;padding-left:10px}}
 .quem{font-size:14px;color:var(--muted);text-align:right;line-height:1.35}
 .quem button,.quem a{border:0;background:none;color:var(--teal);font-weight:600;padding:0;text-decoration:none;font-size:14px}
 h1{font-size:28px;line-height:1.15;margin:8px 0 16px;letter-spacing:-.02em}
