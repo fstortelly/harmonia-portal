@@ -54,3 +54,32 @@ function cabecalho(titulo, nome, extra = '') {
 }
 // Usado só se o arquivo logo.png não estiver no repositório.
 const LOGO_RESERVA = CRUZ + '<span>Harmonia Animal</span>';
+
+// ---------- arquivos (Supabase Storage, espaço privado "treinamentos") ----------
+const LIMITE_ARQUIVO = 50 * 1024 * 1024;
+function _cabStorage(ct) {
+  const h = { apikey: CFG.key };
+  if (CFG.key.startsWith('eyJ')) h.Authorization = 'Bearer ' + CFG.key;
+  if (ct) h['Content-Type'] = ct;
+  return h;
+}
+const _urlObjeto = cam => `${CFG.url}/storage/v1/object/treinamentos/${cam.split('/').map(encodeURIComponent).join('/')}`;
+async function storageEnviar(cam, file) {
+  let r;
+  try { r = await fetch(_urlObjeto(cam), { method:'POST', headers:{ ..._cabStorage(file.type || 'application/octet-stream'), 'x-upsert':'false' }, body:file }); }
+  catch { throw new Error('Sem conexão. O arquivo não foi enviado.'); }
+  if (!r.ok) { let m = ''; try { m = (await r.json()).message || ''; } catch {} throw new Error('Não foi possível enviar o arquivo' + (m ? ': ' + m : '.')); }
+}
+async function storageBaixar(cam) {
+  const r = await fetch(_urlObjeto(cam), { headers:_cabStorage() });
+  if (!r.ok) throw new Error('Não foi possível abrir o arquivo. Tente de novo.');
+  return r.blob();
+}
+async function storageExcluir(cam) {
+  try { await fetch(`${CFG.url}/storage/v1/object/treinamentos`, { method:'DELETE', headers:_cabStorage('application/json'), body:JSON.stringify({ prefixes:[cam] }) }); } catch {}
+}
+function tamanhoTxt(b) {
+  if (!b) return '';
+  return b < 1024 * 1024 ? Math.max(1, Math.round(b / 1024)) + ' KB' : (b / 1024 / 1024).toFixed(1).replace('.', ',') + ' MB';
+}
+const visualizavel = mime => /^(application\/pdf|image\/)/.test(mime || '');
