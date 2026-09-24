@@ -110,6 +110,15 @@ async function trocarSenha() {
 }
 
 // ---------- menu ----------
+// Endereço de outro site (ex.: app.vercel.app) vira https://…; módulo interno (modulos/x.html) vira /modulos/x.html
+function linkModulo(u) {
+  u = (u || '').trim();
+  if (!u) return '';
+  if (/^https?:\/\//i.test(u)) return u;
+  if (/^modulos\//i.test(u.replace(/^\//, ''))) return '/' + u.replace(/^\//, '');
+  if (/^[\w-]+(\.[\w-]+)+(\/.*)?$/.test(u)) return 'https://' + u;
+  return '/' + u.replace(/^\//, '');
+}
 async function carregarEu() {
   try { P.eu = await rpc('portal_eu', { p_token:H.token }); }
   catch (e) { if (!H.token) { P.view = 'login'; return render(); } return toast(e.message, true); }
@@ -120,9 +129,9 @@ async function carregarEu() {
 function vMenu() {
   const e = P.eu, primeiro = e.pessoa.nome.split(' ')[0];
   const cards = e.modulos.map(m => {
-    const externo = /^https?:/i.test(m.url);
+    const url = linkModulo(m.url), externo = /^https?:/i.test(url);
     const uni = m.por_unidade && m.unidades?.length ? ' · ' + m.unidades.map(u => UNIDADES[u] || u).join(' e ') : '';
-    return `<a class="mod" href="${esc(externo ? m.url : '/' + m.url.replace(/^\//, ''))}">
+    return `<a class="mod" href="${esc(url)}">
       <b>${esc(m.nome)}</b><span class="muted">${esc(m.descricao || '')}</span>
       <div class="tags"><span class="tag">${NIVEIS[m.nivel]}${uni}</span>${externo ? '<span class="tag av">Login próprio por enquanto</span>' : ''}</div></a>`;
   }).join('');
@@ -300,7 +309,7 @@ function vModulo() {
 async function salvarModulo() {
   try {
     await rpc('portal_admin_salvar_modulo', { p_token:H.token, p:{ id:P.edit.id || '', nome:$('#mn').value, descricao:$('#md').value,
-      url:$('#mu').value, ordem:$('#mo').value, por_unidade:$('#mp').checked, ativo:$('#ma').checked } });
+      url:linkModulo($('#mu').value).replace(/^\/(modulos\/)/i, '$1'), ordem:$('#mo').value, por_unidade:$('#mp').checked, ativo:$('#ma').checked } });
     toast('Módulo salvo.'); abrirAdmin('modulos');
   } catch (e) { toast(e.message, true); }
 }
