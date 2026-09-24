@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Harmonia Animal · Portal</title>
+<meta name="theme-color" content="#4E2A84">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/estilo.css">
+<style>
+.modulos{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:12px}
+.mod{background:var(--card);border:1px solid var(--line);border-radius:var(--r-m);padding:18px;text-decoration:none;color:inherit;display:flex;flex-direction:column;gap:6px;min-height:128px}
+.mod:hover{border-color:var(--teal)}
+.mod b{font-size:19px;letter-spacing:-.01em}
+.mod .muted{font-size:14px;flex:1}
+.mod.admin{background:var(--roxo);border-color:var(--roxo);color:#fff}
+.mod.admin .muted{color:#D9CCF0}
+.matriz{width:100%}
+.matriz td{vertical-align:middle}
+.matriz select{min-height:40px;padding:7px 10px}
+.matriz .unis{display:flex;gap:12px;flex-wrap:wrap}
+.matriz .unis label{display:flex;gap:6px;align-items:center;font-size:14px}
+.matriz .unis input{width:18px;height:18px;accent-color:var(--teal)}
+.boas{font-size:15px;color:var(--muted);margin:-8px 0 18px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script src="/config.js"></script>
+<script src="/comum.js"></script>
+<script>
+const P = { view:'carregando', eu:null, adm:null, aba:'pessoas', edit:null };
+const params = new URLSearchParams(location.search);
+const volta = params.get('volta');
+
+function render() {
+  const app = $('#app');
+  const V = {
+    carregando: () => '<main class="wrap"><p class="muted">Carregando…</p></main>',
+    setup: vSetup, login: vLogin, senha: vSenha, menu: vMenu, admin: vAdmin,
+    pessoa: vPessoa, perfil: vPerfil, modulo: vModulo
+  };
+  app.innerHTML = (V[P.view] || V.carregando)();
+  const foco = app.querySelector('[data-foco]'); if (foco) foco.focus();
+}
+function topo() {
+  return cabecalho('Harmonia Animal', P.eu?.pessoa.nome, P.eu ? '<br><button onclick="sair()">Sair</button>' : '');
+}
+
+// ---------- primeiro acesso ----------
+function vSetup() {
+  return `${cabecalho('Harmonia Animal')}<main class="wrap estreito">
+    <h1>Configuração inicial</h1>
+    <p class="muted">Crie o acesso master. É ele que cadastra a equipe e define o que cada pessoa pode usar.</p>
+    <label class="f"><span>Seu nome</span><input type="text" id="sn" data-foco autocomplete="name"></label>
+    <label class="f"><span>Usuário</span><input type="text" id="su" autocapitalize="none" autocomplete="username"></label>
+    <label class="f"><span>Senha (mínimo 6 caracteres)</span><input type="password" id="ss" autocomplete="new-password"></label>
+    <button class="btn full" onclick="criarMaster()">Criar acesso master</button></main>`;
+}
+async function criarMaster() {
+  try {
+    const r = await rpc('portal_primeiro_acesso', { p_nome:$('#sn').value, p_usuario:$('#su').value, p_senha:$('#ss').value });
+    H.token = r.token; await carregarEu();
+  } catch (e) { toast(e.message, true); }
+}
+
+// ---------- login ----------
+function vLogin() {
+  return `${cabecalho('Harmonia Animal')}<main class="wrap estreito">
+    <h1>Entrar</h1>
+    <label class="f"><span>Usuário</span><input type="text" id="lu" data-foco autocapitalize="none" autocorrect="off" autocomplete="username"></label>
+    <label class="f"><span>Senha</span><input type="password" id="ls" autocomplete="current-password" onkeydown="if(event.key==='Enter')entrar()"></label>
+    <button class="btn full" onclick="entrar()">Entrar</button>
+    <p class="muted small" style="margin-top:18px">Esqueceu a senha ou ainda não tem acesso? Fale com a administração.</p></main>`;
+}
+async function entrar() {
+  try {
+    const r = await rpc('portal_login', { p_usuario:$('#lu').value, p_senha:$('#ls').value });
+    if (r.erro) return toast(r.erro, true);
+    H.token = r.token; await carregarEu();
+  } catch (e) { toast(e.message, true); }
+}
+async function sair() {
+  try { await rpc('portal_sair', { p_token:H.token }); } catch {}
+  H.token = null; P.eu = null; P.view = 'login'; render();
+}
+
+// ---------- trocar senha ----------
+function vSenha() {
+  const obrig = P.eu.pessoa.trocar_senha;
+  return `${topo()}<main class="wrap estreito">
+    ${obrig ? '' : '<button class="voltar" onclick="P.view=\'menu\';render()">‹ Voltar</button>'}
+    <h1>${obrig ? 'Crie sua senha' : 'Trocar senha'}</h1>
+    ${obrig ? '<p class="muted">Você entrou com uma senha provisória. Crie a sua para continuar.</p>' : ''}
+    <label class="f"><span>${obrig ? 'Senha provisória' : 'Senha atual'}</span><input type="password" id="ta" data-foco autocomplete="current-password"></label>
+    <label class="f"><span>Nova senha (mínimo 6 caracteres)</span><input type="password" id="tn" autocomplete="new-password"></label>
+    <label class="f"><span>Repita a nova senha</span><input type="password" id="tr" autocomplete="new-password" onkeydown="if(event.key==='Enter')trocarSenha()"></label>
+    <button class="btn full" onclick="trocarSenha()">Salvar nova senha</button></main>`;
+}
+async function trocarSenha() {
+  if ($('#tn').value !== $('#tr').value) return toast('As duas senhas novas não são iguais.', true);
+  try {
+    await rpc('portal_trocar_senha', { p_token:H.token, p_atual:$('#ta').value, p_nova:$('#tn').value });
+    toast('Senha salva.'); await carregarEu();
+  } catch (e) { toast(e.message, true); }
+}
+
+// ---------- menu ----------
+async function carregarEu() {
+  try { P.eu = await rpc('portal_eu', { p_token:H.token }); }
+  catch (e) { if (!H.token) { P.view = 'login'; return render(); } return toast(e.message, true); }
+  if (P.eu.pessoa.trocar_senha) { P.view = 'senha'; return render(); }
+  if (volta && volta.startsWith('/') && !volta.startsWith('//')) { location.href = volta; return; }
+  P.view = 'menu'; render();
+}
+function vMenu() {
+  const e = P.eu, primeiro = e.pessoa.nome.split(' ')[0];
+  const cards = e.modulos.map(m => {
+    const externo = /^https?:/i.test(m.url);
+    const uni = m.por_unidade && m.unidades?.length ? ' · ' + m.unidades.map(u => UNIDADES[u] || u).join(' e ') : '';
+    return `<a class="mod" href="${esc(externo ? m.url : '/' + m.url.replace(/^\//, ''))}">
+      <b>${esc(m.nome)}</b><span class="muted">${esc(m.descricao || '')}</span>
+      <div class="tags"><span class="tag">${NIVEIS[m.nivel]}${uni}</span>${externo ? '<span class="tag av">Login próprio por enquanto</span>' : ''}</div></a>`;
+  }).join('');
+  const admin = e.pessoa.master ? `<button class="mod admin" style="text-align:left;font:inherit;cursor:pointer" onclick="abrirAdmin()">
+      <b>Administração</b><span class="muted">Pessoas, perfis e módulos</span></button>` : '';
+  return `${topo()}<main class="wrap">
+    <h1>Olá, ${esc(primeiro)}</h1>
+    <p class="boas">Escolha o que você quer abrir.</p>
+    ${cards || admin ? `<div class="modulos">${cards}${admin}</div>` : '<div class="vazio">Você ainda não tem nenhum módulo liberado. Fale com a administração.</div>'}
+    <div class="linha-btn" style="margin-top:28px"><button class="btn sec" onclick="P.view='senha';render()">Trocar minha senha</button></div></main>`;
+}
+
+// ---------- administração ----------
+async function abrirAdmin(aba) {
+  if (aba) P.aba = aba;
+  try { P.adm = await rpc('portal_admin_dados', { p_token:H.token }); P.view = 'admin'; render(); window.scrollTo(0,0); }
+  catch (e) { toast(e.message, true); }
+}
+function subabas() {
+  const b = (id, t) => `<button aria-current="${P.aba===id}" onclick="P.aba='${id}';render()">${t}</button>`;
+  return `<div class="subabas">${b('pessoas','Pessoas')}${b('perfis','Perfis')}${b('modulos','Módulos')}</div>`;
+}
+function vAdmin() {
+  const A = P.adm;
+  let corpo = '';
+  if (P.aba === 'pessoas') {
+    const perfil = id => A.perfis.find(p => p.id === id)?.nome || 'Sem perfil';
+    const nomeMod = id => A.modulos.find(m => m.id === id)?.nome || id;
+    corpo = `<div class="linha-btn" style="margin:0 0 14px"><button class="btn" onclick="editarPessoa()">Cadastrar pessoa</button></div>
+      <div class="lista">${A.pessoas.map(p => `<button class="item" onclick="editarPessoa('${p.id}')" style="${p.ativo ? '' : 'opacity:.55'}"><div class="grow">
+        <h3>${esc(p.nome)}</h3><div class="muted small">${esc(p.usuario)} · ${esc(perfil(p.perfil_id))}</div>
+        <div class="tags">${p.master ? '<span class="tag live">Master</span>' : p.acessos.map(a => `<span class="tag">${esc(nomeMod(a.modulo_id))}: ${NIVEIS[a.nivel]}</span>`).join('')}
+        ${p.trocar_senha ? '<span class="tag av">Senha provisória</span>' : ''}${p.ativo ? '' : '<span class="tag no">Inativa</span>'}</div></div></button>`).join('')}</div>`;
+  } else if (P.aba === 'perfis') {
+    corpo = `<p class="muted small">Perfis são modelos: ao cadastrar alguém, o perfil preenche os acessos, e você ajusta as exceções. Mudar um perfil não altera quem já foi cadastrado.</p>
+      <div class="linha-btn" style="margin:0 0 14px"><button class="btn" onclick="editarPerfil()">Criar perfil</button></div>
+      <div class="lista">${A.perfis.map(p => `<button class="item" onclick="editarPerfil('${p.id}')"><div class="grow"><h3>${esc(p.nome)}</h3>
+        <div class="tags">${Object.entries(p.niveis).map(([m, n]) => `<span class="tag">${esc(A.modulos.find(x => x.id === m)?.nome || m)}: ${NIVEIS[n] || n}</span>`).join('') || '<span class="muted small">Sem acessos</span>'}</div></div></button>`).join('')}</div>`;
+  } else {
+    corpo = `<p class="muted small">Módulos sem endereço não aparecem no menu. Para os apps antigos, cole o link atual até eles virarem módulos do portal.</p>
+      <div class="linha-btn" style="margin:0 0 14px"><button class="btn" onclick="editarModulo()">Adicionar módulo</button></div>
+      <div class="lista">${A.modulos.map(m => `<button class="item" onclick="editarModulo('${m.id}')" style="${m.ativo ? '' : 'opacity:.55'}"><div class="grow"><h3>${esc(m.nome)}</h3>
+        <div class="muted small">${esc(m.url || 'Sem endereço')}</div>
+        <div class="tags">${m.por_unidade ? '<span class="tag">Por unidade</span>' : ''}${m.ativo ? '' : '<span class="tag no">Desativado</span>'}${m.url ? '' : '<span class="tag av">Não aparece no menu</span>'}</div></div></button>`).join('')}</div>`;
+  }
+  return `${topo()}<main class="wrap"><button class="voltar" onclick="P.view='menu';carregarEu()">‹ Portal</button>
+    <h1>Administração</h1>${subabas()}${corpo}</main>`;
+}
+
+// ---------- matriz de acessos ----------
+function matriz(acessos) {
+  return `<div class="card rolagem" style="padding:4px 12px"><table class="matriz"><tbody>${P.adm.modulos.map(m => {
+    const a = acessos[m.id] || {};
+    return `<tr><td><b>${esc(m.nome)}</b>${m.ativo ? '' : ' <span class="muted small">(desativado)</span>'}</td>
+      <td style="width:150px"><select data-mod="${m.id}" aria-label="Nível em ${esc(m.nome)}">
+        <option value="">Sem acesso</option><option value="usa" ${a.nivel==='usa'?'selected':''}>Usa</option>
+        <option value="gerencia" ${a.nivel==='gerencia'?'selected':''}>Gerencia</option></select></td>
+      ${m.por_unidade ? `<td><div class="unis">${Object.entries(UNIDADES).map(([u, t]) =>
+        `<label><input type="checkbox" data-uni="${m.id}" value="${u}" ${(a.unidades || []).includes(u) ? 'checked' : ''}>${t}</label>`).join('')}</div></td>` : '<td></td>'}</tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+function lerMatriz(comUnidades) {
+  const out = {};
+  for (const s of $$('select[data-mod]')) {
+    if (!s.value) continue;
+    const m = s.dataset.mod, mod = P.adm.modulos.find(x => x.id === m);
+    const unidades = $$(`input[data-uni="${m}"]:checked`).map(x => x.value);
+    if (comUnidades && mod.por_unidade && !unidades.length) throw new Error(`Marque pelo menos uma unidade em ${mod.nome}.`);
+    out[m] = { nivel:s.value, unidades };
+  }
+  return out;
+}
+
+// ---------- pessoa ----------
+function editarPessoa(id) {
+  const p = id ? P.adm.pessoas.find(x => x.id === id) : null;
+  P.edit = p ? { ...p, acessosMap:Object.fromEntries(p.acessos.map(a => [a.modulo_id, a])) }
+             : { nome:'', usuario:'', perfil_id:'', master:false, ativo:true, acessosMap:{} };
+  P.view = 'pessoa'; render(); window.scrollTo(0,0);
+}
+function aplicarPerfil(pid) {
+  const pf = P.adm.perfis.find(x => x.id === pid); if (!pf) return;
+  for (const s of $$('select[data-mod]')) {
+    const m = s.dataset.mod, nv = pf.niveis[m] || '';
+    s.value = nv;
+    const mod = P.adm.modulos.find(x => x.id === m);
+    if (mod.por_unidade) $$(`input[data-uni="${m}"]`).forEach(c => c.checked = !!nv);
+  }
+  toast('Acessos preenchidos pelo perfil. Ajuste o que precisar.');
+}
+function vPessoa() {
+  const p = P.edit, nova = !p.id, souEu = p.id === P.eu.pessoa.id;
+  return `${topo()}<main class="wrap"><button class="voltar" onclick="abrirAdmin('pessoas')">‹ Pessoas</button>
+    <h1>${nova ? 'Cadastrar pessoa' : esc(p.nome)}</h1>
+    <div class="duas quebra"><label class="f"><span>Nome</span><input type="text" id="pn" value="${esc(p.nome)}" ${nova ? 'data-foco' : ''}></label>
+      <label class="f"><span>Usuário</span><input type="text" id="pu" value="${esc(p.usuario)}" autocapitalize="none" autocorrect="off" placeholder="ex.: ana.souza"></label></div>
+    ${nova ? `<label class="f"><span>Senha provisória (a pessoa troca no primeiro acesso)</span><input type="text" id="ps" autocomplete="off" placeholder="mínimo 6 caracteres"></label>` : ''}
+    <label class="f"><span>Perfil</span><select id="pp" onchange="aplicarPerfil(this.value)">
+      <option value="">Sem perfil</option>${P.adm.perfis.map(f => `<option value="${f.id}" ${f.id===p.perfil_id?'selected':''}>${esc(f.nome)}</option>`).join('')}</select></label>
+    <h2>Acessos</h2>
+    ${p.master ? '<p class="muted small">Master tem acesso total a todos os módulos, inclusive valores e dados sensíveis. Os acessos abaixo só valem se o master for desmarcado.</p>' : ''}
+    ${matriz(p.acessosMap)}
+    <div style="margin-top:18px">
+      <label class="chk"><input type="checkbox" id="pm" ${p.master ? 'checked' : ''} ${souEu ? 'disabled' : ''}> Master (acesso total e administração do portal)</label>
+      ${nova ? '' : `<label class="chk"><input type="checkbox" id="pa" ${p.ativo ? 'checked' : ''} ${souEu ? 'disabled' : ''}> Ativa (desmarque quando a pessoa sair da equipe)</label>`}
+    </div>
+    <div class="linha-btn"><button class="btn" onclick="salvarPessoa()">${nova ? 'Cadastrar' : 'Salvar alterações'}</button>
+      ${nova ? '' : '<button class="btn sec" onclick="resetarSenha()">Definir senha provisória</button>'}</div></main>`;
+}
+async function salvarPessoa() {
+  const p = P.edit;
+  try {
+    const mapa = lerMatriz(true);
+    const q = { id:p.id || '', nome:$('#pn').value, usuario:$('#pu').value, perfil_id:$('#pp').value,
+      master:$('#pm').checked, ativo:$('#pa') ? $('#pa').checked : true, senha:$('#ps')?.value || '',
+      acessos:Object.entries(mapa).map(([modulo_id, a]) => ({ modulo_id, ...a })) };
+    await rpc('portal_admin_salvar_pessoa', { p_token:H.token, p:q });
+    toast(p.id ? 'Alterações salvas.' : `${q.nome} cadastrada. Passe o usuário e a senha provisória para ela.`);
+    abrirAdmin('pessoas');
+  } catch (e) { toast(e.message, true); }
+}
+async function resetarSenha() {
+  const s = prompt(`Nova senha provisória para ${P.edit.nome} (mínimo 6 caracteres). Ela vai precisar trocar ao entrar.`);
+  if (!s) return;
+  try { await rpc('portal_admin_resetar_senha', { p_token:H.token, p_pessoa:P.edit.id, p_senha:s }); toast('Senha provisória definida.'); }
+  catch (e) { toast(e.message, true); }
+}
+
+// ---------- perfil ----------
+function editarPerfil(id) {
+  const p = id ? P.adm.perfis.find(x => x.id === id) : { nome:'', niveis:{} };
+  P.edit = { ...p, acessosMap:Object.fromEntries(Object.entries(p.niveis).map(([m, n]) => [m, { nivel:n }])) };
+  P.view = 'perfil'; render(); window.scrollTo(0,0);
+}
+function vPerfil() {
+  const p = P.edit;
+  const m = matriz(p.acessosMap).replace(/<td><div class="unis">[\s\S]*?<\/div><\/td>/g, '<td class="muted small">unidade na pessoa</td>');
+  return `${topo()}<main class="wrap"><button class="voltar" onclick="abrirAdmin('perfis')">‹ Perfis</button>
+    <h1>${p.id ? 'Editar perfil' : 'Criar perfil'}</h1>
+    <label class="f"><span>Nome do perfil</span><input type="text" id="fn" value="${esc(p.nome)}" ${p.id ? '' : 'data-foco'}></label>
+    <h2>Acessos padrão</h2>${m}
+    <div class="linha-btn"><button class="btn" onclick="salvarPerfil()">Salvar perfil</button>
+      ${p.id ? '<button class="btn perigo" onclick="excluirPerfil()">Excluir perfil</button>' : ''}</div></main>`;
+}
+async function salvarPerfil() {
+  try {
+    const niveis = Object.fromEntries(Object.entries(lerMatriz(false)).map(([m, a]) => [m, a.nivel]));
+    await rpc('portal_admin_salvar_perfil', { p_token:H.token, p:{ id:P.edit.id || '', nome:$('#fn').value, niveis } });
+    toast('Perfil salvo.'); abrirAdmin('perfis');
+  } catch (e) { toast(e.message, true); }
+}
+async function excluirPerfil() {
+  if (!confirm('Excluir este perfil? Quem está nele fica sem perfil, mas mantém os acessos.')) return;
+  try { await rpc('portal_admin_excluir_perfil', { p_token:H.token, p_perfil:P.edit.id }); toast('Perfil excluído.'); abrirAdmin('perfis'); }
+  catch (e) { toast(e.message, true); }
+}
+
+// ---------- módulo ----------
+function editarModulo(id) {
+  P.edit = id ? { ...P.adm.modulos.find(x => x.id === id) } : { nome:'', descricao:'', url:'', ordem:50, por_unidade:false, ativo:true };
+  P.view = 'modulo'; render(); window.scrollTo(0,0);
+}
+function vModulo() {
+  const m = P.edit;
+  return `${topo()}<main class="wrap"><button class="voltar" onclick="abrirAdmin('modulos')">‹ Módulos</button>
+    <h1>${m.id ? esc(m.nome) : 'Adicionar módulo'}</h1>
+    <label class="f"><span>Nome</span><input type="text" id="mn" value="${esc(m.nome)}"></label>
+    <label class="f"><span>Descrição curta</span><input type="text" id="md" value="${esc(m.descricao || '')}"></label>
+    <label class="f"><span>Endereço</span><input type="text" id="mu" value="${esc(m.url || '')}" autocapitalize="none" placeholder="https://… ou modulos/nome.html"></label>
+    <label class="f" style="max-width:160px"><span>Ordem no menu</span><input type="number" id="mo" value="${m.ordem}"></label>
+    <label class="chk"><input type="checkbox" id="mp" ${m.por_unidade ? 'checked' : ''}> Acesso por unidade (Barão / Bonfim)</label>
+    <label class="chk"><input type="checkbox" id="ma" ${m.ativo ? 'checked' : ''}> Ativo</label>
+    <div class="linha-btn"><button class="btn" onclick="salvarModulo()">Salvar módulo</button></div></main>`;
+}
+async function salvarModulo() {
+  try {
+    await rpc('portal_admin_salvar_modulo', { p_token:H.token, p:{ id:P.edit.id || '', nome:$('#mn').value, descricao:$('#md').value,
+      url:$('#mu').value, ordem:$('#mo').value, por_unidade:$('#mp').checked, ativo:$('#ma').checked } });
+    toast('Módulo salvo.'); abrirAdmin('modulos');
+  } catch (e) { toast(e.message, true); }
+}
+
+// ---------- início ----------
+(async function init() {
+  render();
+  if (!CFG || !CFG.key || CFG.key.startsWith('COLE_')) {
+    $('#app').innerHTML = '<main class="wrap"><h1>Falta configurar</h1><p>Abra o arquivo <b>config.js</b> e cole a chave pública do Supabase.</p></main>';
+    return;
+  }
+  if (H.token) return carregarEu();
+  try { const s = await rpc('portal_status'); P.view = s.configurado ? 'login' : 'setup'; }
+  catch (e) { P.view = 'login'; toast(e.message, true); }
+  render();
+})();
+</script>
+</body>
+</html>
