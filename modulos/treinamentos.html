@@ -29,6 +29,10 @@
 .opc.certa{border-color:var(--ok);background:var(--ok-bg)}
 .opc.errada{border-color:var(--alerta);background:var(--alerta-bg)}
 .nota{font-size:40px;font-weight:800;line-height:1}
+.arq{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.arq:last-child{border-bottom:0}
+.arq .grow{min-width:150px}
+.arquivo-in{display:block;width:100%;padding:12px;border:1.5px dashed var(--line);border-radius:var(--r-s);background:var(--card)}
 /* palco (tela grande) */
 .palco{position:fixed;inset:0;background:var(--roxo);color:#fff;z-index:20;overflow:auto;
   padding:calc(16px + env(safe-area-inset-top,0px)) 16px calc(16px + env(safe-area-inset-bottom,0px))}
@@ -87,7 +91,7 @@
 <script>
 const dia = iso => iso.slice(8,10), mes = iso => MES[+iso.slice(5,7)-1];
 const MODAL = { presencial:'Presencial', online:'Online', hibrido:'Presencial e online' };
-const TIPOS = { quiz:'Quiz', enquete:'Enquete', aberta:'Pergunta aberta', link:'Questionário externo' };
+const TIPOS = { quiz:'Quiz', enquete:'Enquete', aberta:'Pergunta aberta', link:'Questionário externo', arquivo:'Envio de arquivo' };
 const STATUS = { ok:['Presente','ok'], manual:['Lançado manualmente','ok'], fora_do_local:['Fora do local','no'], sem_localizacao:['Sem localização','av'] };
 const ICON = {
   ok:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="11" fill="#2E7D4F"/><path d="M7 12.5l3.2 3.2L17 9" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
@@ -97,8 +101,9 @@ const ICON = {
   assinar:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h3v3h-3zM20 14v7M14 20h3"/></svg>'
 };
 const S = { acesso:null, ger:false, view:'assinar', meus:[], dados:null, pendente:null, resultado:null, treinoId:null,
-  ativTreino:null, editando:null, relDe:null, relAte:null, live:null };
+  ativTreino:null, editando:null, materiais:{}, relDe:null, relAte:null, live:null };
 const tk = () => H.token;
+const aceitaArquivo = a => a.tipo === 'arquivo' || (a.tipo === 'link' && a.dados.pedir_arquivo);
 
 // ================= render =================
 function render() {
@@ -177,6 +182,27 @@ function vAssinado() {
     <div class="linha-btn" style="justify-content:center"><button class="btn" onclick="abrirAtivs('${r.treino_id}')">Ver atividades do treinamento</button></div></div>`;
 }
 
+// ================= arquivos =================
+function listaArquivos(fs, podeExcluir) {
+  return fs.map(f => `<div class="arq"><span class="grow"><b>${esc(f.nome)}</b> <span class="muted small">${tamanhoTxt(f.tamanho)}</span></span>
+    ${visualizavel(f.mime) ? `<button class="btn sec mini" onclick="abrirArquivo('${f.id}')">Abrir</button>` : ''}
+    <button class="btn sec mini" onclick="abrirArquivo('${f.id}',true)">Baixar</button>
+    ${podeExcluir ? `<button class="btn perigo mini" onclick="excluirMaterial('${f.id}')">Excluir</button>` : ''}</div>`).join('');
+}
+async function abrirArquivo(id, baixar) {
+  const janela = baixar ? null : window.open('', '_blank');
+  try {
+    const f = await rpc('treino_abrir_arquivo', { p_token:tk(), p_arquivo:id });
+    toast('Carregando arquivo…');
+    let blob = await storageBaixar(f.caminho);
+    if (f.mime) blob = new Blob([blob], { type:f.mime });
+    const u = URL.createObjectURL(blob);
+    if (janela) janela.location.href = u;
+    else { const a = document.createElement('a'); a.href = u; a.download = f.nome; document.body.appendChild(a); a.click(); a.remove(); }
+    setTimeout(() => URL.revokeObjectURL(u), 120000);
+  } catch (e) { janela?.close(); toast(e.message, true); }
+}
+
 // ================= meus treinamentos =================
 function vMeus() {
   const hoje = hojeISO();
@@ -190,6 +216,7 @@ function vMeus() {
     return `<div class="item"><div class="data"><b>${dia(t.data)}</b><span>${mes(t.data)}</span></div>
     <div class="grow"><h3>${esc(t.titulo)}</h3><div class="muted small">${t.hora_inicio}${t.hora_fim ? '–' + t.hora_fim : ''} · ${MODAL[t.modalidade]}${t.local_texto ? ' · ' + esc(t.local_texto) : ''}</div>
     ${t.conteudo ? `<details class="small" style="margin-top:6px"><summary>Conteúdo</summary><div class="conteudo">${esc(t.conteudo)}</div></details>` : ''}
+    ${t.materiais.length ? `<details class="small" style="margin-top:6px"><summary><b>Materiais (${t.materiais.length})</b></summary>${listaArquivos(t.materiais)}</details>` : ''}
     <div class="tags">${st}${t.presente && t.n_atividades ? `<button class="btn mini ${abertas ? '' : 'sec'}" onclick="abrirAtivs('${t.id}')">${abertas ? `Responder atividades (${abertas})` : 'Atividades'}</button>` : ''}</div></div></div>`;
   };
   return `<h1>Meus treinamentos</h1>
@@ -237,7 +264,11 @@ function vAtivs() {
     } else if (a.tipo === 'link') {
       corpo = `${d.instrucao ? `<p>${esc(d.instrucao)}</p>` : ''}<div class="linha-btn" style="margin-top:0">
         <a class="btn ${a.minha ? 'sec' : ''}" href="${esc(d.url)}" target="_blank" rel="noopener">Abrir questionário</a>
-        ${a.minha ? '<span class="tag ok" style="align-self:center">Você marcou como respondido</span>' : `<button class="btn sec" onclick="responder('${a.id}')">Já respondi</button>`}</div>`;
+        ${a.minha ? (d.pedir_arquivo ? '' : '<span class="tag ok" style="align-self:center">Você marcou como respondido</span>')
+          : (d.pedir_arquivo ? '' : `<button class="btn sec" onclick="responder('${a.id}')">Já respondi</button>`)}</div>`
+        + (d.pedir_arquivo ? `<div style="margin-top:14px">${campoEntrega(a, 'Depois de responder, envie aqui o resultado (print ou PDF).')}</div>` : '');
+    } else if (a.tipo === 'arquivo') {
+      corpo = `${d.instrucao ? `<p>${esc(d.instrucao)}</p>` : ''}${campoEntrega(a)}`;
     }
     return `<div class="ativ"><div class="ativ-cab"><span class="tipo">${TIPOS[a.tipo]}</span>${a.minha ? '<span class="tag ok">Respondida</span>' : ''}</div>
       ${a.titulo ? `<h3 style="margin-bottom:8px">${esc(a.titulo)}</h3>` : ''}${corpo}</div>`;
@@ -271,6 +302,27 @@ async function responder(aid) {
   } catch (e) { toast(e.message, true); }
 }
 
+function campoEntrega(a, dica) {
+  if (a.minha) return `<div class="arq"><span class="grow">Arquivo enviado: <b>${esc(a.minha.nome)}</b></span>
+    <button class="btn sec mini" onclick="abrirArquivo('${a.minha.arquivo_id}',true)">Baixar</button></div>`;
+  return `${dica ? `<p class="muted small">${dica}</p>` : ''}<input type="file" id="f-${a.id}" class="arquivo-in">
+    <button class="btn full" style="margin-top:10px" onclick="enviarEntrega('${a.id}')">Enviar arquivo</button>`;
+}
+async function enviarEntrega(aid) {
+  const f = $(`#f-${aid}`)?.files?.[0];
+  if (!f) return toast('Escolha o arquivo primeiro.', true);
+  if (f.size > LIMITE_ARQUIVO) return toast('O arquivo passa de 50 MB. Envie uma versão menor.', true);
+  $$('main .btn').forEach(b => b.disabled = true);
+  try {
+    toast('Enviando arquivo…');
+    const { caminho } = await rpc('treino_preparar_entrega', { p_token:tk(), p_atividade:aid, p_nome:f.name });
+    await storageEnviar(caminho, f);
+    await rpc('treino_responder', { p_token:tk(), p_atividade:aid, p_resposta:{ caminho, nome:f.name, tamanho:f.size, mime:f.type || null } });
+    toast('Arquivo enviado.');
+  } catch (e) { toast(e.message, true); }
+  abrirAtivs(S.ativTreino);
+}
+
 // ================= gerência: dados auxiliares =================
 function convocados(t) {
   const pres = new Set(S.dados.presencas.filter(p => p.treinamento_id === t.id).map(p => p.pessoa_id));
@@ -297,7 +349,33 @@ function vTreinos() {
     ${prox.length ? `<div class="lista">${prox.map(it).join('')}</div>` : '<div class="vazio">Nenhum treinamento agendado. Crie o próximo em “Novo treinamento”.</div>'}
     ${pass.length ? `<h2>Realizados</h2><div class="lista">${pass.map(it).join('')}</div>` : ''}`;
 }
-function abrirTreino(id) { S.treinoId = id; S.view = 'treino'; render(); window.scrollTo(0,0); }
+function abrirTreino(id) { S.treinoId = id; S.view = 'treino'; render(); window.scrollTo(0,0); carregarMateriais(); }
+async function carregarMateriais() {
+  const id = S.treinoId;
+  try { S.materiais[id] = await rpc('treino_ger_materiais', { p_token:tk(), p_treino:id }); if (S.view === 'treino' && S.treinoId === id) render(); }
+  catch (e) { toast(e.message, true); }
+}
+async function enviarMateriais(input) {
+  const files = [...input.files]; input.value = '';
+  let ok = 0;
+  for (const f of files) {
+    if (f.size > LIMITE_ARQUIVO) { toast(`${f.name} passa de 50 MB e não foi enviado.`, true); continue; }
+    try {
+      toast(`Enviando ${f.name}…`);
+      const { caminho } = await rpc('treino_ger_preparar_material', { p_token:tk(), p_treino:S.treinoId, p_nome:f.name });
+      await storageEnviar(caminho, f);
+      await rpc('treino_ger_registrar_material', { p_token:tk(), p_treino:S.treinoId, p_caminho:caminho, p_nome:f.name, p_tamanho:f.size, p_mime:f.type || null });
+      ok++;
+    } catch (e) { toast(`${f.name}: ${e.message}`, true); }
+  }
+  if (ok) toast(ok > 1 ? `${ok} materiais enviados.` : 'Material enviado.');
+  carregarMateriais();
+}
+async function excluirMaterial(id) {
+  if (!confirm('Excluir este material? A equipe deixa de ter acesso a ele.')) return;
+  try { const r = await rpc('treino_ger_excluir_material', { p_token:tk(), p_arquivo:id }); await storageExcluir(r.caminho); toast('Material excluído.'); carregarMateriais(); }
+  catch (e) { toast(e.message, true); }
+}
 
 // ================= gerência: detalhe =================
 function vTreino() {
@@ -333,6 +411,9 @@ function vTreino() {
       <button class="btn sec" onclick="sortear('${t.id}')">Sortear</button>
       <button class="btn sec" onclick="imprimir('${t.id}')">Imprimir lista</button>
       <button class="btn sec" onclick="editarTreino('${t.id}')">Editar</button></div>
+    <h2>Materiais</h2>
+    <div class="card" style="padding:4px 16px">${S.materiais[t.id] ? (listaArquivos(S.materiais[t.id], true) || '<p class="muted small" style="padding:12px 0">Nenhum material ainda. Envie apresentações, PDFs, documentos ou planilhas para a equipe abrir e baixar.</p>') : '<p class="muted small" style="padding:12px 0">Carregando…</p>'}</div>
+    <label class="btn sec" style="margin-top:10px">Enviar materiais<input type="file" multiple hidden onchange="enviarMateriais(this)"></label>
     ${ativs ? `<h2>Atividades</h2><div class="card" style="padding:4px 16px">${ativs}</div>` : ''}
     <h2>Presença: ${pres.size} de ${conv.length}</h2>
     <div class="card" style="padding:4px 16px">${linhas || '<p class="muted" style="padding:12px 0">Ninguém convocado. Confira os perfis em “Editar” e os acessos no portal.</p>'}</div>
@@ -382,9 +463,13 @@ function edAtiv(a, i) {
   } else if (a.tipo === 'aberta') {
     campos = `<label class="f"><span>Pergunta</span><textarea data-a="${i}" data-c="pergunta" style="min-height:70px">${esc(d.pergunta || '')}</textarea></label>
       <label class="chk"><input type="checkbox" data-a="${i}" data-c="anonima" ${a.anonima ? 'checked' : ''}> Respostas anônimas</label>`;
-  } else {
+  } else if (a.tipo === 'link') {
     campos = `<label class="f"><span>Link do questionário</span><input type="url" data-a="${i}" data-c="url" value="${esc(d.url || '')}" placeholder="https://forms.gle/…"></label>
-      <label class="f"><span>Instrução (opcional)</span><input type="text" data-a="${i}" data-c="instrucao" value="${esc(d.instrucao || '')}"></label>`;
+      <label class="f"><span>Instrução (opcional)</span><input type="text" data-a="${i}" data-c="instrucao" value="${esc(d.instrucao || '')}"></label>
+      <label class="chk"><input type="checkbox" data-a="${i}" data-c="pedir_arquivo" ${d.pedir_arquivo ? 'checked' : ''}> Pedir que enviem o resultado em arquivo (print ou PDF), em vez de só marcar “Já respondi”</label>`;
+  } else {
+    campos = `<label class="f"><span>O que a pessoa deve enviar</span><textarea data-a="${i}" data-c="instrucao" style="min-height:70px" placeholder="Ex.: Envie a foto do protocolo preenchido">${esc(d.instrucao || '')}</textarea></label>
+      <p class="muted small">Aceita qualquer arquivo de até 50 MB: foto, PDF, Word, planilha.</p>`;
   }
   return `<div class="ativ"><div class="ativ-cab"><span class="tipo">${TIPOS[a.tipo]}</span>
       <button class="btn sec mini" onclick="rmAtiv(${i})">Remover</button></div>
@@ -410,7 +495,7 @@ function vForm() {
   <label class="f" style="max-width:220px"><span>Tolerância de distância (m)</span><input type="number" id="fz" min="30" step="10" value="${t.raio_m || 150}"></label>
   <p class="muted small">No presencial, quem assinar a mais que essa distância do aparelho que abriu a lista fica marcado como “fora do local”.</p>
   <h2>Atividades</h2>
-  <p class="muted small">Só quem assinou a presença responde. Você libera cada uma na hora certa, durante o treinamento.</p>
+  <p class="muted small">${t.id ? '' : 'Os materiais (PDF, apresentações, documentos) você envia na página do treinamento, depois de salvar. '}Só quem assinou a presença responde. Você libera cada uma na hora certa, durante o treinamento.</p>
   ${t.atividades.map(edAtiv).join('')}
   <div class="linha-btn" style="margin-top:0">${Object.entries(TIPOS).map(([k, v]) => `<button class="btn sec mini" onclick="addAtiv('${k}')">+ ${v}</button>`).join('')}</div>
   <div class="linha-btn" style="margin-top:28px"><button class="btn" onclick="salvarTreino()">Salvar treinamento</button></div>`;
@@ -440,7 +525,7 @@ function lerForm() {
 function addAtiv(tipo) {
   lerForm();
   const dados = { quiz:{ perguntas:[{ texto:'', opcoes:[], correta:-1 }] }, enquete:{ pergunta:'', opcoes:[], multipla:false },
-    aberta:{ pergunta:'' }, link:{ url:'', instrucao:'' } }[tipo];
+    aberta:{ pergunta:'' }, link:{ url:'', instrucao:'', pedir_arquivo:false }, arquivo:{ instrucao:'' } }[tipo];
   S.editando.atividades.push({ tipo, titulo:'', anonima:false, dados }); render();
   const cards = $$('.ativ'); cards[cards.length - 1]?.scrollIntoView({ block:'center' });
 }
@@ -461,6 +546,7 @@ function validarAtivs(ats) {
       if (!a.dados.pergunta.trim()) return `${nome}: escreva a pergunta.`;
       if (a.dados.opcoes.length < 2) return `${nome}: coloque pelo menos 2 opções.`;
     } else if (a.tipo === 'aberta') { if (!a.dados.pergunta.trim()) return `${nome}: escreva a pergunta.`; }
+    else if (a.tipo === 'arquivo') { if (!(a.dados.instrucao || '').trim()) return `${nome}: escreva o que a pessoa deve enviar.`; }
     else if (!/^https?:\/\/\S+$/i.test(a.dados.url.trim())) return `${nome}: cole um link completo, começando com https://`;
   }
   return null;
@@ -471,7 +557,7 @@ async function salvarTreino() {
   if (erro) return toast(erro, true);
   const atividades = t.atividades.map(a => ({ id:a.id || '', tipo:a.tipo, titulo:a.titulo, anonima:a.anonima,
     dados: a.tipo === 'quiz' ? { perguntas:a.dados.perguntas.map(q => ({ texto:q.texto, opcoes:q.opcoes, correta:q.correta })) }
-         : a.tipo === 'link' ? { url:a.dados.url.trim(), instrucao:a.dados.instrucao } : a.dados }));
+         : a.tipo === 'link' ? { url:a.dados.url.trim(), instrucao:a.dados.instrucao, pedir_arquivo:!!a.dados.pedir_arquivo } : a.dados }));
   const p = { id:t.id || '', titulo:t.titulo, data:t.data, modalidade:t.modalidade, hora_inicio:t.hora_inicio, hora_fim:t.hora_fim,
     local_texto:t.local_texto, responsavel:t.responsavel, conteudo:t.conteudo, obrigatorio:t.obrigatorio, raio_m:t.raio_m,
     funcoes:t.funcoes, atividades };
@@ -581,6 +667,12 @@ function htmlResultado(r, comNomes) {
   } else if (r.tipo === 'aberta') {
     if (r.titulo && d.pergunta) h += `<p style="font-size:20px">${esc(d.pergunta)}</p>`;
     h += R.length ? R.map(x => `<div class="rtexto">${esc(x.resposta.texto)}${nomes ? `<small>${esc(x.nome)}</small>` : ''}</div>`).join('') : '<p>Ainda sem respostas.</p>';
+  } else if (r.tipo === 'arquivo' || (r.tipo === 'link' && d.pedir_arquivo)) {
+    if (d.instrucao) h += `<p style="font-size:18px">${esc(d.instrucao)}</p>`;
+    h += barra('Enviaram o arquivo', R.length, r.presentes);
+    if (nomes && R.length) h += R.map(x => `<div class="rtexto" style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+      <span>${esc(x.nome)}<small>${esc(x.resposta.nome || '')}</small></span>
+      <button class="btn claro mini" onclick="abrirArquivo('${x.resposta.arquivo_id}',true)">Baixar</button></div>`).join('');
   } else {
     h += barra('Marcaram como respondido', R.length, r.presentes);
     if (nomes && R.length) h += `<p style="color:#D9CCF0">${R.map(x => esc(x.nome)).join(', ')}</p>`;
@@ -616,7 +708,7 @@ function imprimir(id) {
   const t = S.dados.treinamentos.find(x => x.id === id);
   const pres = new Map(presencasDe(id).map(p => [p.pessoa_id, p]));
   const conv = convocados(t).sort((a, b) => a.nome.localeCompare(b.nome));
-  $('#print').innerHTML = `<h1>Lista de presença · ${esc(t.titulo)}</h1>
+  $('#print').innerHTML = `<img src="/logo.png" alt="Harmonia Animal" style="height:52px;display:block;margin-bottom:12px"><h1>Lista de presença · ${esc(t.titulo)}</h1>
     <p>Harmonia Animal · ${dataBR(t.data)} · ${t.hora_inicio}${t.hora_fim ? '–' + t.hora_fim : ''} · ${MODAL[t.modalidade]}${t.local_texto ? ' · ' + esc(t.local_texto) : ''}${t.responsavel ? ' · Responsável: ' + esc(t.responsavel) : ''}</p>
     ${t.conteudo ? `<p style="white-space:pre-wrap"><b>Conteúdo:</b> ${esc(t.conteudo)}</p>` : ''}
     <table><thead><tr><th>Nome</th><th>Perfil</th><th>Situação</th><th>Assinatura digital</th></tr></thead><tbody>
@@ -624,7 +716,8 @@ function imprimir(id) {
       <td>${pr ? (STATUS[pr.status]?.[0] || 'Presente') + (pr.modo === 'online' ? ' (online)' : '') + (pr.atrasado ? ' · atrasado' : '') : 'Ausente'}</td>
       <td>${pr && pr.status !== 'manual' ? new Date(pr.assinado_em).toLocaleString('pt-BR') : (pr ? 'lançado pela gestão' : '')}</td></tr>`; }).join('')}
     </tbody></table><p style="margin-top:14px">Presentes: ${pres.size} de ${conv.length}</p>`;
-  window.print();
+  const logo = $('#print img');
+  if (logo.complete) window.print(); else logo.onload = logo.onerror = () => window.print();
 }
 
 // ================= relatórios =================
