@@ -47,6 +47,10 @@ function posicao() {
 }
 const CRUZ = '<svg class="cruz" viewBox="0 0 24 24" aria-hidden="true"><path fill="#13877F" d="M9 2h6v7h7v6h-7v7H9v-7H2V9h7z"/></svg>';
 function cabecalho(titulo, nome, extra = '') {
-  return `<header class="top"><a class="marca" href="/">${CRUZ}<span>${esc(titulo)}</span></a>
+  const modulo = titulo && titulo !== 'Harmonia Animal' ? `<span class="modulo-nome">${esc(titulo)}</span>` : '';
+  return `<header class="top"><a class="marca" href="/" aria-label="Harmonia Animal, voltar ao portal">
+      <img class="logo" src="/logo.png" alt="Harmonia Animal" onerror="this.outerHTML=LOGO_RESERVA">${modulo}</a>
     <div class="quem">${esc(nome || '')}${extra}</div></header>`;
 }
+// Usado só se o arquivo logo.png não estiver no repositório.
+const LOGO_RESERVA = CRUZ + '<span>Harmonia Animal</span>';
